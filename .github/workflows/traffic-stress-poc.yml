@@ -30,11 +30,19 @@ jobs:
       - name: SPF traffic-stress PoC
         run: python -m experiments.run_traffic_stress_spf --seeds 11,22,33
 
+      - name: SPF offered-load calibration
+        run: python -m experiments.run_load_sweep_spf --rates 0.10,0.25,0.50,1.00 --seeds 11,22,33
+
       - name: Show aggregate results
         if: always()
         run: |
           if [ -f results/traffic_stress_poc/summary.csv ]; then
+            echo '=== traffic_stress_poc ==='
             cat results/traffic_stress_poc/summary.csv
+          fi
+          if [ -f results/load_sweep_spf/summary.csv ]; then
+            echo '=== load_sweep_spf ==='
+            cat results/load_sweep_spf/summary.csv
           fi
 
       - name: Upload simulation results
@@ -42,5 +50,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: traffic-stress-poc-results
-          path: results/traffic_stress_poc/
+          path: results/
           if-no-files-found: warn
