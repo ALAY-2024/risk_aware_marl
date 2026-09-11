@@ -1,0 +1,46 @@
+name: traffic-stress-poc
+
+on:
+  push:
+    branches: [traffic-stress-poc]
+  workflow_dispatch:
+
+jobs:
+  test-and-simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install minimal simulation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy astropy rustworkx torch tensorboard
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -p 'test_traffic_stress.py' -v
+
+      - name: SPF traffic-stress PoC
+        run: python -m experiments.run_traffic_stress_spf --seeds 11,22,33
+
+      - name: Show aggregate results
+        if: always()
+        run: |
+          if [ -f results/traffic_stress_poc/summary.csv ]; then
+            cat results/traffic_stress_poc/summary.csv
+          fi
+
+      - name: Upload simulation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: traffic-stress-poc-results
+          path: results/traffic_stress_poc/
+          if-no-files-found: warn
