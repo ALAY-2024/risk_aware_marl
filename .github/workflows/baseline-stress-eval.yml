@@ -1,0 +1,43 @@
+name: baseline-stress-eval
+
+on:
+  push:
+    branches: [traffic-stress-poc]
+    paths:
+      - '.github/workflows/baseline-stress-eval.yml'
+  workflow_dispatch:
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy astropy rustworkx torch tensorboard
+      - name: Evaluate pretrained PRIMAL-Avg and MADQN
+        run: >-
+          python -m experiments.run_pretrained_stress_eval
+          --config configs/traffic_stress_full_poc.json
+          --solvers primal_avg,madqn
+          --seeds 11
+          --packet-rate 5.0
+          --out-dir results/pretrained_baseline_stress_eval
+      - name: Print results
+        if: always()
+        run: |
+          if [ -f results/pretrained_baseline_stress_eval/summary.csv ]; then
+            cat results/pretrained_baseline_stress_eval/summary.csv
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pretrained-baseline-stress-eval-results
+          path: results/pretrained_baseline_stress_eval/
+          if-no-files-found: warn
