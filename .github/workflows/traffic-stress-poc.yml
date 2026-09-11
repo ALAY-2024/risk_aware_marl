@@ -30,20 +30,26 @@ jobs:
       - name: SPF traffic-stress PoC
         run: python -m experiments.run_traffic_stress_spf --seeds 11,22,33
 
-      - name: SPF offered-load calibration
+      - name: SPF offered-load calibration on small geometry
         run: python -m experiments.run_load_sweep_spf --rates 0.10,0.25,0.50,1.00 --seeds 11,22,33
+
+      - name: SPF offered-load calibration on full Starlink geometry
+        run: >-
+          python -m experiments.run_load_sweep_spf
+          --config configs/traffic_stress_full_poc.json
+          --rates 1.0,5.0,10.0
+          --seeds 11
+          --out-dir results/load_sweep_spf_full
 
       - name: Show aggregate results
         if: always()
         run: |
-          if [ -f results/traffic_stress_poc/summary.csv ]; then
-            echo '=== traffic_stress_poc ==='
-            cat results/traffic_stress_poc/summary.csv
-          fi
-          if [ -f results/load_sweep_spf/summary.csv ]; then
-            echo '=== load_sweep_spf ==='
-            cat results/load_sweep_spf/summary.csv
-          fi
+          for f in results/*/summary.csv; do
+            if [ -f "$f" ]; then
+              echo "=== $f ==="
+              cat "$f"
+            fi
+          done
 
       - name: Upload simulation results
         if: always()
