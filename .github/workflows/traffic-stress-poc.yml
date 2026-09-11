@@ -41,6 +41,15 @@ jobs:
           --seeds 11
           --out-dir results/load_sweep_spf_full
 
+      - name: Pretrained PRIMAL-CVaR traffic-stress evaluation
+        run: >-
+          python -m experiments.run_pretrained_stress_eval
+          --config configs/traffic_stress_full_poc.json
+          --solvers primal_cvar
+          --seeds 11
+          --packet-rate 5.0
+          --out-dir results/pretrained_stress_eval
+
       - name: Show aggregate results
         if: always()
         run: |
