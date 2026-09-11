@@ -14,7 +14,7 @@ on:
 jobs:
   evaluate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,7 +30,7 @@ jobs:
           python -m experiments.run_pretrained_stress_eval
           --config configs/traffic_stress_full_poc.json
           --solvers primal_cvar
-          --seeds 11
+          --seeds 11,22,33
           --packet-rate 5.0
           --out-dir results/pretrained_stress_eval
       - name: Print results
