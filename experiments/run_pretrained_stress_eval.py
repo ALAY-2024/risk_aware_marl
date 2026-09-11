@@ -6,6 +6,8 @@ import json
 import statistics
 from pathlib import Path
 
+import numpy as np
+
 from experiments.traffic_stress_env import TrafficStressRoutingEnv
 from sat_net.solver import create_solver
 from sat_net.util import NamedDict
@@ -34,6 +36,13 @@ SCENARIOS = [
         "start_ms": 1000,
         "duration_ms": 3000,
     },
+    {
+        "name": "china_4p0x",
+        "hotspot_regions": HOTSPOT,
+        "multiplier": 4.0,
+        "start_ms": 1000,
+        "duration_ms": 3000,
+    },
 ]
 
 MODEL_PATHS = {
@@ -57,11 +66,23 @@ METRICS = [
     "cost_mean",
 ]
 
+EXTRA_METRICS = [
+    "queue_delay_p95",
+    "queue_delay_p99",
+    "e2e_delay_p95",
+    "e2e_delay_p99",
+    "hotspot_generated",
+    "hotspot_delivered",
+    "hotspot_dropped",
+    "hotspot_delivery_fraction",
+    "hotspot_queue_delay_mean",
+    "hotspot_queue_delay_p95",
+    "hotspot_e2e_delay_mean",
+]
+
 
 def load_solver(env, model_path: str):
     solver_config = NamedDict.load(f"{model_path}/solver_config.json")
-    # Upstream checkpoints were trained on Apple MPS.  CPU keeps CI and
-    # reproducibility independent of local accelerator availability.
     solver_config.device = "cpu"
     solver = create_solver(
         obs_dim=env.obs_dim,
@@ -84,6 +105,76 @@ def drop_reason_counts(env) -> dict[str, int]:
     return counts
 
 
+def weighted_mean(blocks, attribute: str) -> float:
+    if not blocks:
+        return 0.0
+    values = np.asarray([float(getattr(block, attribute)) for block in blocks], dtype=float)
+    weights = np.asarray([int(getattr(block, "packet_count", 1)) for block in blocks], dtype=float)
+    if weights.sum() <= 0:
+        return 0.0
+    return float(np.average(values, weights=weights))
+
+
+def weighted_quantile(blocks, attribute: str, q: float) -> float:
+    if not blocks:
+        return 0.0
+    values = np.asarray([float(getattr(block, attribute)) for block in blocks], dtype=float)
+    weights = np.asarray([int(getattr(block, "packet_count", 1)) for block in blocks], dtype=float)
+    order = np.argsort(values)
+    values = values[order]
+    weights = weights[order]
+    cumulative = np.cumsum(weights)
+    threshold = q * cumulative[-1]
+    idx = int(np.searchsorted(cumulative, threshold, side="left"))
+    return float(values[min(idx, len(values) - 1)])
+
+
+def packet_weight(blocks) -> int:
+    return int(sum(int(getattr(block, "packet_count", 1)) for block in blocks))
+
+
+def extra_metrics(env) -> dict[str, float]:
+    delivered = list(env.delivered_packets)
+    hotspot_ids = {
+        region.id for region in env.traffic_model.regions if region.name in set(HOTSPOT)
+    }
+    hotspot_generated_blocks = [
+        block for block in env.generated_packets if block.source_region_id in hotspot_ids
+    ]
+    hotspot_delivered_blocks = [
+        block for block in env.delivered_packets if block.source_region_id in hotspot_ids
+    ]
+    hotspot_dropped_blocks = [
+        block for block in env.dropped_packets if block.source_region_id in hotspot_ids
+    ]
+
+    hotspot_generated = packet_weight(hotspot_generated_blocks)
+    hotspot_delivered = packet_weight(hotspot_delivered_blocks)
+    hotspot_dropped = packet_weight(hotspot_dropped_blocks)
+
+    return {
+        "queue_delay_p95": weighted_quantile(delivered, "queue_delay", 0.95),
+        "queue_delay_p99": weighted_quantile(delivered, "queue_delay", 0.99),
+        "e2e_delay_p95": weighted_quantile(delivered, "e2e_delay", 0.95),
+        "e2e_delay_p99": weighted_quantile(delivered, "e2e_delay", 0.99),
+        "hotspot_generated": hotspot_generated,
+        "hotspot_delivered": hotspot_delivered,
+        "hotspot_dropped": hotspot_dropped,
+        "hotspot_delivery_fraction": (
+            hotspot_delivered / hotspot_generated if hotspot_generated > 0 else 0.0
+        ),
+        "hotspot_queue_delay_mean": weighted_mean(
+            hotspot_delivered_blocks, "queue_delay"
+        ),
+        "hotspot_queue_delay_p95": weighted_quantile(
+            hotspot_delivered_blocks, "queue_delay", 0.95
+        ),
+        "hotspot_e2e_delay_mean": weighted_mean(
+            hotspot_delivered_blocks, "e2e_delay"
+        ),
+    }
+
+
 def run_one(config_path: str, model_key: str, scenario: dict, seed: int, packet_rate: float) -> dict:
     config = NamedDict.load(config_path)
     config.verbose = False
@@ -104,8 +195,8 @@ def run_one(config_path: str, model_key: str, scenario: dict, seed: int, packet_
     }
     for key in METRICS:
         row[key] = getattr(metrics, key)
-    reasons = drop_reason_counts(env)
-    row["drop_reasons_json"] = json.dumps(reasons, sort_keys=True)
+    row.update(extra_metrics(env))
+    row["drop_reasons_json"] = json.dumps(drop_reason_counts(env), sort_keys=True)
     return row
 
 
@@ -120,7 +211,7 @@ def aggregate(rows: list[dict]) -> list[dict]:
             "scenario": scenario,
             "n": len(subset),
         }
-        for key in METRICS:
+        for key in METRICS + EXTRA_METRICS:
             values = [float(row[key]) for row in subset]
             item[f"{key}_mean"] = statistics.fmean(values)
             item[f"{key}_std"] = statistics.stdev(values) if len(values) > 1 else 0.0
@@ -170,17 +261,23 @@ def main() -> None:
     print("\n=== Pretrained policy traffic-stress sensitivity ===")
     for key in solver_keys:
         normal = next(x for x in summary if x["model_key"] == key and x["scenario"] == "normal")
-        stress = next(x for x in summary if x["model_key"] == key and x["scenario"] == "china_2p0x")
-        delay_delta = (
-            stress["e2e_delay_mean_mean"] / normal["e2e_delay_mean_mean"] - 1.0
-            if normal["e2e_delay_mean_mean"] > 0 else 0.0
-        )
-        drop_delta = stress["drop_rate_mean"] - normal["drop_rate_mean"]
-        print(
-            f"{key:>12s}: normal delay={normal['e2e_delay_mean_mean']:.2f} ms, "
-            f"2x delay={stress['e2e_delay_mean_mean']:.2f} ms ({delay_delta:+.1%}), "
-            f"drop change={drop_delta:+.2%}"
-        )
+        for scenario_name in ("china_2p0x", "china_4p0x"):
+            stress = next(x for x in summary if x["model_key"] == key and x["scenario"] == scenario_name)
+            q_delta = (
+                stress["queue_delay_mean_mean"] / normal["queue_delay_mean_mean"] - 1.0
+                if normal["queue_delay_mean_mean"] > 0 else 0.0
+            )
+            q95_delta = (
+                stress["queue_delay_p95_mean"] / normal["queue_delay_p95_mean"] - 1.0
+                if normal["queue_delay_p95_mean"] > 0 else 0.0
+            )
+            print(
+                f"{key:>12s} {scenario_name:>12s}: "
+                f"queue={stress['queue_delay_mean_mean']:.2f} ms ({q_delta:+.1%}), "
+                f"queue-p95={stress['queue_delay_p95_mean']:.2f} ms ({q95_delta:+.1%}), "
+                f"hotspot-queue={stress['hotspot_queue_delay_mean_mean']:.2f} ms, "
+                f"e2e={stress['e2e_delay_mean_mean']:.2f} ms"
+            )
 
 
 if __name__ == "__main__":
