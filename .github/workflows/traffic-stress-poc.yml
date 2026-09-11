@@ -1,8 +1,6 @@
 name: traffic-stress-poc
 
 on:
-  push:
-    branches: [traffic-stress-poc]
   workflow_dispatch:
 
 jobs:
