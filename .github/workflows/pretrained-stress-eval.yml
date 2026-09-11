@@ -1,0 +1,50 @@
+name: pretrained-stress-eval
+
+on:
+  push:
+    branches: [traffic-stress-poc]
+    paths:
+      - 'experiments/run_pretrained_stress_eval.py'
+      - 'experiments/traffic_stress_env.py'
+      - 'sat_net/traffic_stress.py'
+      - 'configs/traffic_stress_full_poc.json'
+      - '.github/workflows/pretrained-stress-eval.yml'
+  workflow_dispatch:
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy astropy rustworkx torch tensorboard
+      - name: Evaluate pretrained PRIMAL-CVaR
+        run: >-
+          python -m experiments.run_pretrained_stress_eval
+          --config configs/traffic_stress_full_poc.json
+          --solvers primal_cvar
+          --seeds 11
+          --packet-rate 5.0
+          --out-dir results/pretrained_stress_eval
+      - name: Print results
+        if: always()
+        run: |
+          if [ -f results/pretrained_stress_eval/summary.csv ]; then
+            cat results/pretrained_stress_eval/summary.csv
+          fi
+          if [ -f results/pretrained_stress_eval/raw.csv ]; then
+            cat results/pretrained_stress_eval/raw.csv
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pretrained-stress-eval-results
+          path: results/pretrained_stress_eval/
+          if-no-files-found: warn
