@@ -1,11 +1,13 @@
 name: Reproduction smoke tests
 
 on:
-  push:
-    branches: [reproduce-and-debug]
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: reproduction-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
