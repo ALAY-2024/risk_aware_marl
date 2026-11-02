@@ -61,7 +61,7 @@ jobs:
           print(metrics.get_summary())
           PY
       - name: Full-scale pretrained PRIMAL-CVaR and SPF compatibility smoke
-        run: python scripts/ci_eval_pretrained.py --seconds=1.0 --seed=20261102
+        run: python -m scripts.ci_eval_pretrained --seconds=1.0 --seed=20261102
       - name: Archive CPU training checkpoint and metrics
         if: success()
         uses: actions/upload-artifact@v4
