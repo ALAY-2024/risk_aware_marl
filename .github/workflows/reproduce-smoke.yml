@@ -60,6 +60,21 @@ jobs:
           assert len(env.generated_packets) > 0
           print(metrics.get_summary())
           PY
+      - name: Full-scale pretrained PRIMAL-CVaR and SPF compatibility smoke
+        run: python scripts/ci_eval_pretrained.py --seconds=1.0 --seed=20261102
+      - name: Archive CPU training checkpoint and metrics
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpu-smoke-model-and-metrics
+          path: |
+            runs_train/**/models/last_model/*.pth
+            runs_train/**/console.log
+            runs_train/**/env_config.json
+            runs_train/**/solver_config.json
+            runs_train/**/packets/packets_epoch_1.csv
+          retention-days: 7
+          if-no-files-found: error
       - name: Archive test results
         if: always()
         uses: actions/upload-artifact@v4
