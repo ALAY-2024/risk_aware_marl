@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from sat_net.datablock import DataBlock
-from sat_net.event import EventScheduler
+from sat_net.event import EventScheduler, EventType
 from sat_net.link import Link
 from sat_net.nn import DiscretePolicy
 from sat_net.node import Node
@@ -60,10 +60,15 @@ def test_queue_wait_is_recorded_once_in_transition_cost():
     assert packets[1].total_queue_cost == pytest.approx(20.0)
     assert packets[1].last_action.queue_delay == pytest.approx(20.0)
 
-    while len(env.scheduler):
+    transmitted = 0
+    while len(env.scheduler) and transmitted < 2:
         event = env.scheduler.pop_event()
+        if event.event_type != EventType.TRANSMIT_END:
+            continue
         env.current_time = event.time
         env._handle_transmit_end(event)
+        transmitted += 1
+    assert transmitted == 2
 
     assert packets[1].queue_delay == pytest.approx(20.0)
     assert packets[1].last_action.queue_delay == pytest.approx(
