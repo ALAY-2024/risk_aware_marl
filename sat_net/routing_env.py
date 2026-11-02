@@ -293,12 +293,9 @@ class RoutingEnvAsync:
         packet.queue_delay += wait_time
         packet.transmission_delay += transmit_time
 
-        # record the cost of load-imbalancing
-        if packet.last_action is not None:
-            if "queue_delay" not in packet.last_action:
-                packet.last_action.queue_delay = wait_time
-            else:
-                packet.last_action.queue_delay += wait_time
+        # The action's queueing cost was already recorded when the
+        # transmission was scheduled in _forward_data_block(). Updating the
+        # packet's realized delay here must not charge the action a second time.
 
         link_used = sender.outgoing_links[next_hop]
         link_used.start_propagate(packet_id=packet.id)
