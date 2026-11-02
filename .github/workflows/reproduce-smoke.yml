@@ -35,6 +35,31 @@ jobs:
         run: python -m compileall -q sat_net satnet_viewer run_train.py run_eval.py run_spf.py
       - name: Core invariants and simulator smoke tests
         run: python -m pytest -q tests --junitxml=test-results.xml
+      - name: Bounded end-to-end training with actual CLI
+        run: |
+          python run_train.py --env=configs/ci_smoke_env.json --solver=configs/ci_smoke_primal.json --num_epochs=1 --seed=12345
+      - name: Reload checkpoint and evaluate on independent traffic seed
+        run: |
+          python - <<'PY'
+          import glob
+          from sat_net.routing_env import RoutingEnvAsync
+          from sat_net.solver import create_solver
+          from sat_net.util import NamedDict
+
+          ckpts = glob.glob("runs_train/PrimalCVaR_*/models/last_model/PrimalCVaR.pth")
+          assert len(ckpts) == 1, f"Expected one checkpoint, got {ckpts}"
+          env_config = NamedDict.load("configs/ci_smoke_env.json")
+          solver_config = NamedDict.load("configs/ci_smoke_primal.json")
+          env = RoutingEnvAsync(env_config)
+          solver = create_solver(env.obs_dim, env.action_dim, solver_config)
+          solver.load_models(ckpts[0].rsplit("/", 1)[0])
+          solver.set_eval()
+          env.reset(seed=54321)
+          env.run(solver)
+          metrics = env.calc_metrics()
+          assert len(env.generated_packets) > 0
+          print(metrics.get_summary())
+          PY
       - name: Archive test results
         if: always()
         uses: actions/upload-artifact@v4
