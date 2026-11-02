@@ -24,6 +24,8 @@ jobs:
         solver: [spf, madqn, primal_avg, primal_cvar]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
