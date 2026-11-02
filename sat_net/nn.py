@@ -207,7 +207,8 @@ class DiscretePolicy(nn.Module):
         x = self.feature_net(x)
         x = self.output_head(x) / self.temperature
         if action_mask is not None:
-            logits = x.masked_fill(~action_mask, -1e-8)
+            # Mask invalid actions to negligible probability under softmax.
+            logits = x.masked_fill(~action_mask, -1e9)
         else:
             logits = x
         return logits
