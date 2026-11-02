@@ -1,0 +1,61 @@
+name: Verify paper table with supplied checkpoints
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-eval-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    name: ${{ matrix.mode }} / ${{ matrix.solver }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [repository, paper_three_city_approx]
+        solver: [spf, madqn, primal_avg, primal_cvar]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install CPU runtime requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install numpy==2.2.6 astropy==6.1.7 Pillow==11.2.1 rustworkx pandas tensorboard
+      - name: Verify baseline source remains unmodified
+        run: |
+          git diff --exit-code origin/main -- sat_net/
+          git rev-parse HEAD
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for model in ("madqn", "primal_avg", "primal_cvar"):
+              root = Path("saved_models") / model
+              conf = json.loads((root / "solver_config.json").read_text())
+              weight_files = list((root / "models/best_model").glob("*.pth"))
+              assert len(weight_files) == 1
+              print("MODEL_CONFIG", model, conf["name"], conf.get("hidden_dim"), conf.get("batch_size"), weight_files[0].stat().st_size)
+          PY
+      - name: Evaluate original pretrained models for full 30-second horizon
+        run: |
+          python -m scripts.reproduce_paper_table --mode=${{ matrix.mode }} --solver=${{ matrix.solver }} --seconds=30 --seeds=1 --base-seed=3333
+      - name: Upload exact evaluation metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-table-${{ matrix.mode }}-${{ matrix.solver }}
+          path: paper_eval_results/
+          if-no-files-found: warn
+          retention-days: 14
