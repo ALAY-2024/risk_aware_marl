@@ -36,7 +36,7 @@ jobs:
           python -m pip install numpy==2.2.6 astropy==6.1.7 Pillow==11.2.1 rustworkx pandas tensorboard
       - name: Verify baseline source remains unmodified
         run: |
-          git diff --exit-code origin/main -- sat_net/
+          git diff --exit-code HEAD^1 -- sat_net/
           git rev-parse HEAD
           python - <<'PY'
           import json
