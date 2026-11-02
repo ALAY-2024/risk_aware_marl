@@ -1,0 +1,84 @@
+name: Reproduction smoke tests
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: reproduction-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cpu-smoke:
+    name: CPU simulator and PRIMAL-CVaR checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install numpy==2.2.6 astropy==6.1.7 Pillow==11.2.1 rustworkx pandas tensorboard pytest
+      - name: Compile project modules
+        run: python -m compileall -q sat_net satnet_viewer run_train.py run_eval.py run_spf.py
+      - name: Core invariants and simulator smoke tests
+        run: python -m pytest -q tests --junitxml=test-results.xml
+      - name: Bounded end-to-end training with actual CLI
+        run: |
+          python run_train.py --env=configs/ci_smoke_env.json --solver=configs/ci_smoke_primal.json --num_epochs=1 --seed=12345
+      - name: Reload checkpoint and evaluate on independent traffic seed
+        run: |
+          python - <<'PY'
+          import glob
+          from sat_net.routing_env import RoutingEnvAsync
+          from sat_net.solver import create_solver
+          from sat_net.util import NamedDict
+
+          ckpts = glob.glob("runs_train/PrimalCVaR_*/models/last_model/PrimalCVaR.pth")
+          assert len(ckpts) == 1, f"Expected one checkpoint, got {ckpts}"
+          env_config = NamedDict.load("configs/ci_smoke_env.json")
+          solver_config = NamedDict.load("configs/ci_smoke_primal.json")
+          env = RoutingEnvAsync(env_config)
+          solver = create_solver(env.obs_dim, env.action_dim, solver_config)
+          solver.load_models(ckpts[0].rsplit("/", 1)[0])
+          solver.set_eval()
+          env.reset(seed=54321)
+          env.run(solver)
+          metrics = env.calc_metrics()
+          assert len(env.generated_packets) > 0
+          print(metrics.get_summary())
+          PY
+      - name: Full-scale pretrained PRIMAL-CVaR and SPF compatibility smoke
+        run: python -m scripts.ci_eval_pretrained --seconds=1.0 --seed=20261102
+      - name: Archive CPU training checkpoint and metrics
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpu-smoke-model-and-metrics
+          path: |
+            runs_train/**/models/last_model/*.pth
+            runs_train/**/console.log
+            runs_train/**/env_config.json
+            runs_train/**/solver_config.json
+            runs_train/**/packets/packets_epoch_1.csv
+          retention-days: 7
+          if-no-files-found: error
+      - name: Archive test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpu-smoke-pytest
+          path: test-results.xml
+          if-no-files-found: warn
